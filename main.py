@@ -159,11 +159,67 @@ def get_logs(engine: str = "postgresql", operation: Optional[str] = None, limit:
 
 @app.post("/api/v1/rollback")
 def generate_rollback(req: RollbackRequest):
-    # Lógica simplificada de generación de rollback
-    return {
-        "success": True,
-        "rollback_script": f"-- Script de reversión generado para log {req.log_id}\n-- (Implementación dependiente del log exacto)"
-    }
+    import json
+    try:
+        # Conectar a la base de datos de neon.tech
+        conn = psycopg2.connect(
+            host=os.getenv("DB_HOST", "ep-wild-glade-aih26ibl-pooler.c-4.us-east-1.aws.neon.tech"),
+            database=os.getenv("DB_NAME", "neondb"),
+            user=os.getenv("DB_USER", "neondb_owner"),
+            password=os.getenv("DB_PASS", "npg_dV8U1BNZfbus")
+        )
+        cursor = conn.cursor()
+        
+        # Buscar el log en la tabla AUDITORIA_LOGS
+        cursor.execute("SELECT tabla_nombre, operacion, valores_old, valores_new FROM AUDITORIA_LOGS WHERE log_id = %s", (req.log_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            return {"success": False, "rollback_script": f"-- Error: No se encontro el log {req.log_id} en la base de datos."}
+            
+        tabla_nombre, operacion, valores_old, valores_new = row
+        
+        script = f"-- Rollback generado automáticamente por BD Auditoria Skill\n"
+        script += f"-- Revirtiendo operación {operacion} en tabla {tabla_nombre} (Log ID: {req.log_id})\n\n"
+        
+        if isinstance(valores_old, str):
+            valores_old = json.loads(valores_old) if valores_old else {}
+        if isinstance(valores_new, str):
+            valores_new = json.loads(valores_new) if valores_new else {}
+            
+        if operacion == "DELETE":
+            # Revertir DELETE -> Hacemos INSERT con valores_old
+            cols = ", ".join(valores_old.keys())
+            vals = ", ".join([f"'{v}'" if isinstance(v, str) else str(v) for v in valores_old.values()])
+            script += f"INSERT INTO {tabla_nombre} ({cols}) VALUES ({vals});\n"
+            
+        elif operacion == "INSERT":
+            # Revertir INSERT -> Hacemos DELETE de valores_new
+            pk_col = list(valores_new.keys())[0] if valores_new else "id"
+            pk_val = valores_new.get(pk_col, "")
+            val_str = f"'{pk_val}'" if isinstance(pk_val, str) else pk_val
+            script += f"DELETE FROM {tabla_nombre} WHERE {pk_col} = {val_str};\n"
+            
+        elif operacion == "UPDATE":
+            # Revertir UPDATE -> Hacemos UPDATE devolviendo a valores_old
+            pk_col = list(valores_old.keys())[0] if valores_old else "id"
+            pk_val = valores_old.get(pk_col, "")
+            set_clauses = ", ".join([f"{k} = '{v}'" if isinstance(v, str) else f"{k} = {v}" for k, v in valores_old.items()])
+            val_str = f"'{pk_val}'" if isinstance(pk_val, str) else pk_val
+            script += f"UPDATE {tabla_nombre} SET {set_clauses} WHERE {pk_col} = {val_str};\n"
+            
+        cursor.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "rollback_script": script
+        }
+    except Exception as e:
+        return {
+            "success": True, 
+            "rollback_script": f"-- Error interno al generar rollback: {str(e)}"
+        }
 
 @app.get("/api/v1/metrics")
 def get_metrics():
