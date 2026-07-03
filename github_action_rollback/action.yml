@@ -1,0 +1,76 @@
+name: 'Automated DB Rollback'
+description: 'Interactúa con la API de Auditoría para generar scripts SQL de reversión y proponerlos vía Pull Request'
+author: 'Tu Nombre / Grupo'
+branding:
+  icon: 'database'
+  color: 'blue'
+
+inputs:
+  log_id:
+    description: 'El ID del log de auditoría que se desea revertir (ej. 1001)'
+    required: true
+  api_url:
+    description: 'URL de tu API de auditoría (por defecto apunta a Railway)'
+    required: false
+    default: 'https://bd-auditoria-skill-production.up.railway.app'
+  github_token:
+    description: 'Token de GitHub (secrets.GITHUB_TOKEN) para crear el Pull Request'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: "Consultar API de Auditoría"
+      shell: bash
+      run: |
+        echo "▶️ Solicitando script de reversión para el Log ID: ${{ inputs.log_id }}..."
+        
+        # Hacemos la petición POST a tu API
+        RESPONSE=$(curl -s -X POST "${{ inputs.api_url }}/api/v1/rollback" \
+          -H "Content-Type: application/json" \
+          -d '{"log_id": "${{ inputs.log_id }}"}')
+        
+        SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+        
+        if [ "$SUCCESS" != "true" ]; then
+          echo "❌ Error: No se pudo generar el rollback. Respuesta de la API: $RESPONSE"
+          exit 1
+        fi
+        
+        # Extraemos el código SQL del JSON
+        SCRIPT=$(echo "$RESPONSE" | jq -r '.rollback_script')
+        
+        # Creamos una carpeta para los rollbacks y guardamos el archivo
+        mkdir -p sql_rollbacks
+        FILE_PATH="sql_rollbacks/revert_${{ inputs.log_id }}.sql"
+        
+        echo "-- Script generado automáticamente por BD Auditoria Skill" > $FILE_PATH
+        echo "$SCRIPT" >> $FILE_PATH
+        
+        echo "✅ Script guardado en $FILE_PATH"
+        
+        # Guardamos la ruta en las variables de entorno de GitHub
+        echo "FILE_PATH=$FILE_PATH" >> $GITHUB_ENV
+
+    - name: "Crear Rama y Pull Request"
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        # Configuramos Git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Creamos una rama nueva y subimos el archivo SQL
+        BRANCH_NAME="rollback/log-${{ inputs.log_id }}-$(date +%s)"
+        git checkout -b $BRANCH_NAME
+        git add ${{ env.FILE_PATH }}
+        git commit -m "Automated Rollback: Revertir Log ID ${{ inputs.log_id }}"
+        git push origin $BRANCH_NAME
+        
+        # Usamos el CLI de GitHub (gh) para crear el Pull Request
+        gh pr create \
+          --title "🚨 Rollback de Emergencia: Log ${{ inputs.log_id }}" \
+          --body "Este Pull Request ha sido generado automáticamente por **DB Audit Skill**. Contiene el script SQL de reversión para deshacer los cambios del Log ID \`${{ inputs.log_id }}\`. 
+          
+          ⚠️ **Por favor, revisa cuidadosamente el archivo \`${{ env.FILE_PATH }}\` antes de ejecutarlo en tu base de datos.**"
