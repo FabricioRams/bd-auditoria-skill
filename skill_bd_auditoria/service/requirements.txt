@@ -1,0 +1,7 @@
+fastapi==0.109.2
+uvicorn==0.27.1
+pydantic==2.6.1
+psycopg2-binary==2.9.9
+PyMySQL==1.1.0
+pymongo==4.6.1
+pandas==2.2.0
