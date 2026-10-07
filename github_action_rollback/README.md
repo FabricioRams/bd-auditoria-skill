@@ -2,6 +2,8 @@
 
 Esta es una **GitHub Action personalizada** desarrollada como parte del sistema de *Auditoría de Bases de Datos*. Permite a cualquier equipo de desarrollo revertir operaciones peligrosas (como un `DELETE` accidental) directamente desde GitHub, sin tocar código.
 
+hola
+
 ## ¿Cómo funciona?
 
 1. Un desarrollador ejecuta esta Action desde la pestaña "Actions" de su repositorio, ingresando el **Log ID** del error.
